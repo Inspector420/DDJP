@@ -1,0 +1,9 @@
+# Build/audit tooling only — the app itself is static and ships lib/ as-is.
+node_modules/
+
+# Output of tools/build-vendor.sh (the produced files are committed into lib/).
+vendor-out/
+
+# Misc
+*.log
+.DS_Store

@@ -1,0 +1,22 @@
+version: 2
+# Dependabot watches the build/audit manifest (package.json/lock) and the CI
+# action versions, opening PRs when the vendored SDK, esbuild, or a workflow
+# action has an update — and surfacing security advisories. Note: GitHub's
+# Dependabot *security alerts* must also be enabled in repo Settings → Security;
+# this file only configures version-update PRs.
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+    # Reminder: matrix-js-sdk / matrix-sdk-crypto-wasm are VENDORED. After bumping
+    # them here, regenerate the bundle with `npm run build:vendor` and update
+    # tools/VENDOR_PROVENANCE.md before merging.
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels: ["dependencies", "ci"]

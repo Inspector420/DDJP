@@ -1,0 +1,39 @@
+name: CI
+
+# Two independent gates (Topic 4):
+#   guards  — runs the architecture/safety guards (tests/run-all.js). No npm
+#             install: the guards use only the Node standard library, so this is
+#             fast and is the gate that protects the html-safety, content-policy,
+#             log-hygiene and boundary invariants on every change.
+#   audit   — checks the vendored SDK's pinned versions for known CVEs via
+#             `npm audit`. The app ships the prebuilt bundle in lib/ and needs no
+#             npm install to RUN; this manifest exists only so vulnerabilities in
+#             matrix-js-sdk / the crypto WASM surface here and via Dependabot.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run architecture & safety guards
+        run: node tests/run-all.js
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install pinned build/audit deps
+        run: npm ci --ignore-scripts
+      - name: Audit dependencies (fail on high/critical)
+        run: npm audit --audit-level=high
