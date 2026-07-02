@@ -1,0 +1,17 @@
+{
+  "name": "ddjp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Decentralized DJ Protocol — static client-side Matrix app. This manifest is BUILD/AUDIT ONLY: the app ships the vendored bundle in lib/ and needs no npm install to run. These devDependencies pin what the vendored SDK is built from, so Dependabot / npm audit can flag CVEs.",
+  "scripts": {
+    "test": "node tests/run-all.js",
+    "build:vendor": "bash tools/build-vendor.sh",
+    "audit": "npm audit --audit-level=high",
+    "bump": "node tools/bump-version.js"
+  },
+  "devDependencies": {
+    "@matrix-org/matrix-sdk-crypto-wasm": "18.3.1",
+    "esbuild": "0.28.1",
+    "matrix-js-sdk": "41.8.0"
+  }
+}

@@ -1,0 +1,648 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>DDJP</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Content-Security-Policy (Topic 3). Delivered via meta because GitHub Pages
+       can't set HTTP headers. Blocks injected/unauthorized script execution and
+       rogue embeds. Notes: connect-src must stay broad (https/wss) because the
+       homeserver is user-chosen, so this hardens injection, not exfiltration —
+       token lifetime is handled in Topic 5. frame-ancestors/report-* are header-
+       only and can't be enforced via meta. style-src keeps 'unsafe-inline' for the
+       page's inline <style> and style="" attributes (not the token-theft vector).
+       'wasm-unsafe-eval' is required in script-src so the Rust crypto WASM can
+       instantiate; without it initRustCrypto() fails and encrypted chat breaks.
+       The 'sha256-…' allows VS Code Live Server's auto-reload script during local
+       dev; it's inert in production (that script isn't present on GitHub Pages).
+       Remove it if you don't use Live Server. -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'none';
+    script-src 'self' 'wasm-unsafe-eval' 'sha256-vvt4KWwuNr51XfE5m+hzeNEGhiOfZzG97ccfqGsPwvE=' https://www.youtube.com https://s.ytimg.com;
+    frame-src https://www.youtube.com https://www.youtube-nocookie.com;
+    img-src 'self' data: blob: https:;
+    media-src 'self' blob:;
+    style-src 'self' 'unsafe-inline';
+    font-src 'self';
+    connect-src 'self' https: wss:;
+    worker-src 'self' blob:;
+    object-src 'none';
+    base-uri 'none';
+    form-action 'none';
+  ">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Arial, sans-serif; background: #111; color: #fff; }
+    /* Dark grey scrollbars to match the theme (was the OS default light/white). Covers
+       every scroll area — panels, queue, chat, settings, logs — in both engines. */
+    * { scrollbar-width: thin; scrollbar-color: #3a3a3a transparent; }            /* Firefox */
+    ::-webkit-scrollbar { width: 10px; height: 10px; }                            /* WebKit/Blink */
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+    ::-webkit-scrollbar-thumb:hover { background: #4a4a4a; background-clip: padding-box; }
+    ::-webkit-scrollbar-corner { background: transparent; }
+    .screen { display: none; flex-direction: column; height: 100vh; height: 100dvh; }
+    h2, h3 { margin: 0; }
+    .muted { color: #888; font-size: 13px; }
+    button { font-family: inherit; }
+
+    /* login */
+    #screen-login { align-items: center; justify-content: center; }
+    .login-box { background: #222; border: 1px solid #444; border-radius: 8px; padding: 30px; width: 320px; display: flex; flex-direction: column; gap: 12px; }
+    .login-box p { margin: 0; color: #aaa; font-size: 13px; }
+    .login-box input { background: #333; border: 1px solid #555; border-radius: 4px; color: #fff; padding: 8px; font-size: 14px; width: 100%; }
+    .login-box button { padding: 10px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; }
+    #btn-login { background: #5865F2; color: #fff; }
+    #btn-sso { background: #2e2e2e; color: #fff; border: 1px solid #555; }
+    .login-or { display: flex; align-items: center; gap: 8px; color: #777; font-size: 12px; }
+    .login-or::before, .login-or::after { content: ""; flex: 1; height: 1px; background: #444; }
+    #login-error { color: #ff6b6b; font-size: 13px; display: none; }
+
+    /* rooms */
+    #screen-rooms { padding: 20px; gap: 16px; }
+    .room-actions { display: flex; gap: 10px; }
+    .room-actions input { flex: 1; background: #333; border: 1px solid #555; border-radius: 4px; color: #fff; padding: 8px; font-size: 14px; }
+    .btn-primary { background: #5865F2; color: #fff; border: none; border-radius: 4px; padding: 10px 16px; cursor: pointer; font-size: 14px; font-weight: bold; }
+    .btn-secondary { background: #333; color: #aaa; border: 1px solid #555; border-radius: 4px; padding: 10px 16px; cursor: pointer; font-size: 14px; }
+    /* Encryption / recovery-key screens (Topic 2) */
+    #screen-encryption { align-items: center; justify-content: center; }
+    .enc-box { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 24px; width: 380px; max-width: 90vw; display: flex; flex-direction: column; gap: 12px; }
+    .enc-box-wide { width: 460px; }
+    .enc-box h2 { margin: 0; }
+    .enc-sub { font-size: 13px; color: #aaa; margin: 0; line-height: 1.5; }
+    .enc-input { background: #333; border: 1px solid #555; border-radius: 4px; color: #fff; padding: 8px; font-size: 14px; width: 100%; box-sizing: border-box; }
+    .enc-key { background: #0d0d0d; border: 1px solid #5865F2; border-radius: 4px; padding: 12px; font-family: monospace; font-size: 14px; color: #fff; word-break: break-all; user-select: all; }
+    .enc-error { color: #f04747; font-size: 12px; margin: 0; min-height: 14px; }
+    .enc-ack { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; color: #ccc; line-height: 1.4; cursor: pointer; }
+    .enc-check { margin-top: 2px; flex-shrink: 0; }
+    .enc-link { background: none; border: none; color: #8a8aff; cursor: pointer; font-size: 13px; text-decoration: underline; padding: 0; text-align: left; }
+    .enc-link-muted { color: #777; }
+    .enc-divider { border-top: 1px solid #333; margin: 4px 0; }
+    #room-list { display: flex; flex-direction: column; gap: 8px; }
+    .room-section-title { margin: 12px 0 0; font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: .5px; }
+    .room-section-title:first-child { margin-top: 0; }
+    .room-item { background: #222; border: 1px solid #333; border-radius: 4px; color: #fff; padding: 12px; cursor: pointer; text-align: left; font-size: 14px; }
+    .room-item:hover { background: #2a2a2a; }
+    .room-badge-owner { background: #5865F2; color: #fff; font-size: 10px; font-weight: bold; border-radius: 3px; padding: 2px 6px; margin-left: 8px; letter-spacing: .5px; text-transform: uppercase; vertical-align: middle; }
+    .room-invite-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; cursor: default; }
+    .room-invite-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .room-accept-btn { padding: 6px 14px; font-size: 13px; flex-shrink: 0; }
+    #create-progress { display: none; flex-direction: column; gap: 8px; background: #1a1a1a; border: 1px solid #333; border-radius: 4px; padding: 12px; }
+    #create-progress-bar-track { background: #333; border-radius: 4px; height: 6px; width: 100%; overflow: hidden; }
+    #create-progress-bar-fill { background: #5865F2; height: 6px; width: 0%; border-radius: 4px; transition: width .3s ease; }
+    #create-progress-step { font-size: 11px; color: #666; }
+
+    /* room-join loading view — shown the instant a room is clicked, while the
+       full-history replay runs in the background (see openRoom in interface.js) */
+    .room-loading-screen { display: flex; flex-direction: column; flex: 1; width: 100%; }
+    .room-loading-screen .back-btn { align-self: flex-start; margin: 16px; }
+    .room-loading { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; padding: 24px; }
+    .room-loading-title { margin: 0; font-size: 20px; }
+    .room-loading-bar-track { width: 220px; height: 6px; background: #333; border-radius: 4px; overflow: hidden; }
+    .room-loading-bar-fill { width: 40%; height: 6px; background: #5865F2; border-radius: 4px; animation: room-loading-slide 1.1s ease-in-out infinite; }
+    @keyframes room-loading-slide { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
+
+    /* main (built by ui/interface.js) */
+    /* #screen-main carries the room background image (set by ui/interface.js via
+       .has-bg + an inline background-image of a downloaded blob). It's painted
+       cover+center+fixed so any aspect ratio fills the viewport without distortion.
+       A dark scrim (::before) sits over the image so light pictures don't wash out
+       text; the three column cards are translucent glass on top of that. */
+    #screen-main { padding: 0; height: 100vh; height: 100dvh; position: relative; background-size: cover; background-position: center; background-repeat: no-repeat; background-attachment: fixed; --bg-dim: 0; --panel-dim: 0.75; }
+    #screen-main.has-bg::before { content: ""; position: absolute; inset: 0; background: rgba(10,10,12, var(--bg-dim, 0)); pointer-events: none; z-index: 0; }
+    #screen-main > * { position: relative; z-index: 1; }
+    /* Header must sit above the columns band so its controls (incl. the layout
+       menu) are never overlapped. NOTE: this uses the same #screen-main > prefix
+       as the rule above so it has equal specificity and actually wins (a bare
+       .main-header would lose to the id-selector and silently do nothing). */
+    #screen-main > .main-header { z-index: 3; }
+    .main-header { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: #222; border-bottom: 1px solid #333; flex-shrink: 0; }
+    .main-header h2 { font-size: 16px; }
+    .back-btn { background: #333; color: #aaa; border: none; border-radius: 4px; padding: 6px 12px; cursor: pointer; font-size: 13px; flex-shrink: 0; white-space: nowrap; }
+    /* Collapsed back button — a square arrow when the header is tight. */
+    .back-btn.collapsed { width: 32px; padding: 6px 0; text-align: center; }
+    .title-group { display: flex; align-items: center; gap: 10px; min-width: 0; flex-shrink: 1; }
+    /* Room title truncates but always shows at least ~1 char (min-width). */
+    .title-group h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .title-group h2.fit-tight { max-width: 4ch; }
+    .rank-badge { background: #5865F2; color: #fff; font-size: 11px; font-weight: bold; border-radius: 3px; padding: 3px 8px; text-transform: uppercase; letter-spacing: .5px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rank-badge.fit-tight { max-width: 5ch; letter-spacing: 0; padding: 3px 5px; }
+    .room-code { font-size: 11px; color: #888; background: #1a1a1a; padding: 6px 10px; border-radius: 4px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .copy-btn { font-size: 11px; color: #cdcdcd; background: #232323; border: 1px solid #383838; padding: 5px 9px; border-radius: 4px; cursor: pointer; white-space: nowrap; transition: background .12s, color .12s; }
+    .copy-btn:hover { background: #2e2e2e; }
+    .copy-btn.copied { background: #1e3a24; color: #6ee787; border-color: #2c5234; }
+    .copy-btn.icon-only { padding: 0; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; line-height: 1; flex: 0 0 auto; }
+    .my-identity { margin-left: auto; display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .my-id { font-size: 11px; color: #aaa; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 1; min-width: 0; }
+    .my-id.fit-tight { max-width: 8ch; }
+    .accounts-wrap { display: flex; flex-direction: column; gap: 12px; width: 460px; max-width: 92vw; margin: 0 auto; }
+    .accounts-head { display: flex; justify-content: space-between; align-items: center; }
+    .accounts-list { display: flex; flex-direction: column; gap: 8px; }
+    .acct-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 12px 14px; }
+    .acct-id { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .acct-id .my-id { max-width: 260px; font-size: 13px; color: #ddd; }
+    .acct-badge { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: #6bbf6b; border: 1px solid #2f5f2f; border-radius: 4px; padding: 2px 6px; }
+    .acct-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+    /* owner upgrade control in the header */
+    .upgrade-slot { display: flex; align-items: center; min-width: 0; }
+    .upgrade-btn { background: #b8860b; color: #fff; border: none; border-radius: 4px; padding: 6px 12px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+    .upgrade-note { color: #888; font-size: 12px; white-space: nowrap; }
+    .upgrade-bar { display: flex; align-items: center; gap: 8px; min-width: 220px; }
+    .upgrade-bar-track { flex: 1; background: #333; border-radius: 4px; height: 6px; overflow: hidden; min-width: 120px; }
+    .upgrade-bar-fill { background: #b8860b; height: 6px; width: 0%; border-radius: 4px; transition: width .3s ease; }
+    .upgrade-bar-label { font-size: 11px; color: #aaa; white-space: nowrap; }
+
+    /* three columns: queues | player | people + chat. Each column is a single
+       translucent glass card (~75% opaque dark) floating over the room background;
+       the background shows through between, around, AND above/below the band (the
+       clamped vertical margin gives ~5–10% breathing room top and bottom). The
+       left (queues) and center (player) cards shrink-wrap to their content and sit
+       at the top of the band — no dead grey stretched beneath them — while the
+       right (chat) card fills the full band height because chat needs the room to
+       scroll. align-items:flex-start lets the cards differ in height; the band
+       itself is the common ceiling. When no background is set the cards read as
+       normal dark panels against the #111 body. */
+    /* Width cap (ultrawide): the band never stretches wider than the aspect ratio
+       it has at the reference resolution (~1920×900 usable = ~2.13:1). Below that
+       ratio (normal/tall screens) nothing changes; on a wider/ultrawide screen the
+       band locks to the ratio and centers, with the background filling the sides —
+       so the look stays the same in ratio terms as it is now. Ratio is height-driven
+       (100vh) so a taller window is allowed a proportionally wider band. */
+    .columns { display: flex; gap: clamp(8px, 1.5vmin, 12px); padding: clamp(8px, 1.5vmin, 12px); flex: 1; min-height: 0; align-items: flex-start; width: 100%; max-width: calc(100vh * 2.13); margin-left: auto; margin-right: auto; }
+    /* The band's SIDE gap — all-sides padding and the inter-panel gap (above) — scales
+       from the 12px ideal down to an 8px phone-tight floor via vmin. The TOP/BOTTOM
+       gap is handled here in two regimes, because one clamp can't be both ~55px at the
+       maximized height AND phone-tight on a short window (the curve is too gentle):
+       - default branch = the PHONE layout's exact top/bottom formula, so a SHORT window
+         is genuinely as small top/bottom as phone is (the "minimum" the operator wanted);
+       - the min-height query restores the generous ideal at the maximized-window height
+         (~918px viewport after the OS taskbar + browser chrome + bookmarks) and taller,
+         so the full-size look is unchanged.
+       Height-driven (a merely-narrow window keeps its top/bottom — that's vertical room).
+       Shared by WIDE and COMPACT; PHONE keeps its own identical small value. The 780px
+       breakpoint is the one knob: lower it if a maximized window ever shows the tight
+       value, raise it to send more windows tight. (There is a step at the breakpoint
+       when resizing across it.) */
+    .columns { margin-top: clamp(6px, 1.5vh, 16px); margin-bottom: clamp(6px, 1.5vh, 16px); }
+    @media (min-height: 780px) {
+      .columns { margin-top: clamp(8px, 6vmin, 64px); margin-bottom: clamp(8px, 6vmin, 64px); }
+    }
+    .column { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px; max-height: 100%; overflow-y: auto; background: rgba(22,22,26, var(--panel-dim, 0.75)); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 12px; }
+    /* Left (queues) + right (chat) fill the band height; only the center player
+       is content-height, vertically centered. */
+    .column-left, .column-right { align-self: stretch; }
+    .column-mid { align-self: center; }
+    .column-mid { flex: 1.2; }
+    .now-playing, .queue-panel, .roster, .chat, .settings, .logs, .upgrade-box { margin: 0; }
+
+    /* Layout selector — a single header icon button + a small popover. Costs no
+       layout space (lives in the existing header). */
+    .layout-selector { position: relative; display: inline-flex; }
+    .layout-btn { background: #232323; color: #cdcdcd; border: 1px solid #383838; border-radius: 4px; width: 30px; height: 28px; cursor: pointer; font-size: 14px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+    .layout-btn:hover { background: #2e2e2e; }
+    .layout-menu { position: absolute; top: 34px; right: 0; z-index: 50; flex-direction: column; gap: 2px; background: #1c1c1f; border: 1px solid #383838; border-radius: 8px; padding: 6px; min-width: 220px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+    .layout-menu-item { display: flex; align-items: center; gap: 10px; background: none; border: none; border-radius: 6px; padding: 8px 10px; cursor: pointer; text-align: left; color: #ddd; }
+    .layout-menu-item:hover { background: #2a2a2e; }
+    .layout-menu-icon { font-size: 14px; color: #9aa; width: 28px; text-align: center; letter-spacing: -1px; }
+    .layout-menu-label { font-size: 13px; color: #eee; }
+    .layout-menu-hint { font-size: 11px; color: #888; }
+
+    /* Higher-level pane nav — styled like the settings sub-bar, a tier ABOVE the
+       natural bars, but mounted INSIDE the active square (.col-bar-mount at the
+       top of each column). Hidden in wide. The mount is empty/zero-size until the
+       bar is placed into it. */
+    .col-bar-mount:empty { display: none; }
+    .pane-nav { display: none; gap: 6px; padding: 0 0 8px; }
+    .pane-nav-btn { background: #222; color: #aaa; border: 1px solid #333; border-radius: 4px; padding: 6px 14px; cursor: pointer; font-size: 13px; }
+    .pane-nav-btn:hover { background: #2a2a2e; color: #ddd; }
+    .pane-nav-btn.active { background: #5865F2; color: #fff; border-color: #5865F2; }
+
+    /* COMPACT — the player is ALWAYS visible; beside it sits ONE switchable
+       panel that's either chat/people or the queues (toggled by the compact
+       switch under the header). Two zones side by side, both centered vertically
+       and horizontally in the band. No DOM moves: we just show the player column
+       plus whichever of the other two columns matches data-compact-side. */
+    /* Compact = wide with the left panel folded into the right, centered as a pair.
+       The two visible panels keep WIDE's column sizes (player = wide's center,
+       combined panel = wide's right; ratio 1.2 : 1).
+       Mechanism: the band is CAPPED at the 1920×1080 reference width (1320px) and
+       the two panels FILL that capped band in the 1.2 : 1 ratio. On a big screen the
+       cap binds, so the pair is centered with the background showing ~300px on each
+       side — the same look as before (at 1920 the panels come out ≈702/585px, the
+       wide column sizes). But once the viewport is NARROWER than the cap, the band is
+       just the viewport width and the panels fill it: the wasted side-gaps collapse
+       to the band padding instead of staying a fixed ~31% of the width, so the panels
+       win the horizontal space back when small (matching the phone view's fill).
+       Heights match wide too: the player is content-height (centered), the combined
+       panel fills the band like wide's chat. */
+    .columns[data-layout="compact"] { justify-content: center; align-items: stretch; max-width: 1320px; }
+    .columns[data-layout="compact"] .column { max-height: 100%; }
+    .columns[data-layout="compact"] .column-mid { order: 1; flex: 1.2 1 0; align-self: center; }
+    .columns[data-layout="compact"] .column-left,
+    .columns[data-layout="compact"] .column-right { order: 2; flex: 1 1 0; align-self: stretch; }
+    /* Hide the non-selected switchable panel. */
+    .columns[data-layout="compact"][data-compact-side="social"] .column-left { display: none; }
+    .columns[data-layout="compact"][data-compact-side="queues"] .column-right { display: none; }
+
+    /* PHONE — one section at a time, sized to fill the phone screen. The band
+       drops the big breathing-room margins (minimal top/bottom padding only) and
+       the active section fills the available width AND height, so queues/chat are
+       as tall as the player — no short-and-floating card. Width adapts to the
+       device: full width on an actual phone, but clamped so phone mode shown on a
+       desktop still reads as a phone column rather than a full-screen stretch.
+       The PLAYER must never unmount (that would stop the music): when it isn't the
+       active pane it collapses IN FLOW to zero height — stays in the document
+       (iframe alive, audio continues), takes no space, can't overlap. No absolute
+       positioning. */
+    .columns[data-layout="phone"] { flex-direction: column; align-items: center; justify-content: stretch; margin-top: clamp(6px, 1.5vh, 16px); margin-bottom: clamp(6px, 1.5vh, 16px); padding: 8px; gap: 0; }
+    .columns[data-layout="phone"] .column { align-self: stretch; width: 100%; max-width: min(100%, 520px); margin: 0 auto; height: 100%; max-height: 100%; }
+    /* The player card stretches to fill the band like queues/chat (consistent
+       card height across all three sections); the video inside stays 16:9 at the
+       top, controls below, the rest is card space. */
+    .columns[data-layout="phone"] .column-mid { align-self: stretch; height: 100%; }
+    /* Non-active sections hide; the active one fills. */
+    .columns[data-layout="phone"] .column-left,
+    .columns[data-layout="phone"] .column-right { display: none; }
+    .columns[data-layout="phone"][data-pane="queues"] .column-left { display: flex; flex: 1; }
+    .columns[data-layout="phone"][data-pane="social"] .column-right { display: flex; flex: 1; }
+    .columns[data-layout="phone"]:not([data-pane="player"]) .column-mid {
+      flex: 0 0 auto; height: 0; min-height: 0; padding: 0; margin: 0; border: 0; overflow: hidden; opacity: 0; pointer-events: none;
+    }
+
+    .skip-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 6px; }
+    .skip-group { display: flex; align-items: stretch; gap: 6px; flex-shrink: 0; }
+    .skip-lock-btn { background: #2e2e35; color: #cdd; border: 1px solid #3a3a44; border-radius: 4px; padding: 7px 0; width: 34px; cursor: pointer; font-size: 13px; line-height: 1; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; }
+    .skip-lock-btn:hover { background: #36363f; }
+    .skip-lock-btn.locked { background: #5a2230; border-color: #7a3145; color: #ffb3c0; }
+    .skip-lock-btn, .leave-lock-btn { position: relative; overflow: hidden; }
+    .lock-ico { display: inline-flex; line-height: 1; }
+    .lock-timer { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; transform: scaleX(0); transform-origin: left; background: #5865F2; pointer-events: none; }
+    .video-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; font-size: 13px; display: block; color: #fff; }
+    .video-title-text { display: inline-block; white-space: nowrap; will-change: transform; }
+    /* Preview mini-player (14 §7): floats OVER the panel/column the row lives in
+       (not a full-screen modal), so it adapts to wide/compact/phone automatically.
+       The BACKDROP is full-screen (position:fixed inset:0) so it dims AND locks the
+       whole UI — the room is a takeover while previewing. The CARD is positioned by
+       _positionPreview over the row's column (so the preview sits IN that panel) and
+       its 16:9 frame is sized to fit. Adapts to wide/compact/phone. ✕ or Esc close it;
+       the backdrop blocks every other click (modal lock) but is light enough to see the
+       room through. The room player pauses behind and re-syncs to live on close. */
+    .preview-overlay { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.4); box-sizing: border-box; }
+    .preview-card { position: absolute; background: #161618; border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; padding: 12px; box-sizing: border-box; box-shadow: 0 12px 40px rgba(0,0,0,0.55); }
+    .preview-frame { position: relative; background: #000; border-radius: 8px; overflow: hidden; }
+    .preview-frame > #yt-preview-player, .preview-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
+    .preview-x { position: absolute; top: 4px; right: 4px; z-index: 3; width: 38px; height: 38px; border-radius: 8px; background: #5a2230; color: #fff; border: 1px solid #7a3145; font-size: 18px; line-height: 1; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+    .preview-x:hover { background: #6e2a3b; }
+    /* The marquee animation is injected per-title by _fitMarquee (a dedicated
+       @keyframes with the literal scroll distance), so there is no static keyframe
+       or custom-property rule here. */
+    .skip-btn { background: #5865F2; color: #fff; border: none; border-radius: 4px; padding: 7px 16px; cursor: pointer; font-size: 13px; flex-shrink: 0; }
+    .skip-btn:disabled { background: #333; color: #666; cursor: default; }
+    /* The player holds a true 16:9 video shape via a wrapper box, driven by its
+       column WIDTH (fixed across resolutions), so the embed is pixel-identical on
+       every screen and the surrounding queue/chat absorb the remaining height
+       proportionally via the vh-based band. The YT API replaces #yt-player with an
+       iframe carrying its own width/height attrs, so we force the iframe to fill
+       the aspect-ratio wrapper. */
+    .player-frame { width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 6px; overflow: hidden; position: relative; }
+    /* Click-shield over the player; shown only when nothing is playing (JS toggles
+       display) so a finished song can't be restarted via YouTube's replay/poster. */
+    .player-shield { position: absolute; inset: 0; z-index: 2; display: none; background: transparent; }
+    .player-frame > iframe, #yt-player { width: 100% !important; height: 100% !important; border: 0; display: block; }
+    /* Playback progress bar — thin button-blue fill, glides via JS rAF loop */
+    .progress-bar { width: 100%; height: 4px; background: #2a2a2a; border-radius: 2px; overflow: hidden; margin-top: 6px; visibility: hidden; }
+    .progress-fill { height: 100%; width: 0%; background: #5865F2; border-radius: 2px; }
+    .np-label { margin-top: 6px; }
+    .skip-note { min-height: 16px; font-size: 12px; color: #e0a030; margin-top: 4px; }
+    .playback-controls { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }
+    .volume-group { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+    .volume-slider { width: 100px; }
+    /* Mute + refresh: squares the same height as the Join/Leave button (≈32px),
+       aligned to the right of the row. The volume slider keeps its natural height,
+       centered within the row by the row's align-items:center. */
+    .mute-btn, .reset-btn { width: 32px; height: 32px; padding: 0; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; background: #333; color: #ccc; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; line-height: 1; }
+    .reset-btn { font-size: 13px; }
+
+    .tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+    .tab { background: #222; color: #aaa; border: 1px solid #333; border-radius: 4px; padding: 6px 14px; cursor: pointer; font-size: 13px; }
+    .tab.active { background: #5865F2; color: #fff; border-color: #5865F2; }
+    .queue-panel { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+    .queue-body { display: flex; flex-direction: column; gap: 6px; min-height: 0; flex: 1; overflow-y: auto; }
+    .rot-item, .uq-item, .person { display: flex; align-items: center; gap: 10px; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 4px; padding: 8px 10px; font-size: 13px; }
+    .rot-item.playing { border-color: #5865F2; }
+    .who { font-weight: bold; color: #cfd3ff; min-width: 80px; }
+    .song { color: #ccc; word-break: break-all; }
+    .rot-actions, .uq-actions { margin-left: auto; display: flex; gap: 4px; }
+    .mini { background: #333; color: #ccc; border: none; border-radius: 3px; padding: 2px 8px; cursor: pointer; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; min-height: 22px; box-sizing: border-box; line-height: 1; font-variant-emoji: text; }
+    .mini:disabled { opacity: 0.4; cursor: default; }
+    .mini.ico { width: 26px; min-width: 26px; padding: 2px 0; font-size: 13px; }
+    .mini.grab { color: #e8c14a; }
+    .mini.grab.on { color: #ffd24a; background: #4a3f1a; }
+    .mini.upvote { color: #4a6a9a; }
+    .mini.upvote.on { color: #4aa3ff; background: #1f3350; }
+    .mini.swap { background: #5865F2; color: #fff; }
+    .mini.swap:hover { background: #4a56d4; }
+    .q-sep { width: 1px; height: 18px; align-self: center; background: #3c4756; margin: 0 3px; flex-shrink: 0; }
+    .np-actions { display: flex; gap: 4px; align-items: center; margin-left: 6px; }
+    .np-actions .mini.ico { width: 32px; min-width: 32px; height: 32px; padding: 0; font-size: 15px; }
+    .danger { align-self: flex-start; background: #5a2230; color: #ffb3c0; border: 1px solid #7a3145; border-radius: 4px; padding: 6px 12px; cursor: pointer; font-size: 12px; margin-top: 6px; }
+    /* The windowed My-Queue / Playlists scroller fills the height the panel gives it
+       (flex:1) rather than sitting at a fixed cap, so a tall window shows more rows and
+       a short one scrolls. min-height:0 lets it shrink inside the flex column; the JS
+       measures clientHeight for the virtual-scroll window. */
+    .uq-scroll { flex: 1 1 auto; min-height: 0; }
+    .uq-add, .invite-row { display: flex; gap: 8px; margin-bottom: 6px; }
+    .uq-listhead { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; font-size: 12px; }
+    /* Push the trailing cluster to the right edge as a unit. In clear mode that is
+       the lone "✕ Clear" button; in confirm mode it is the "Clear N?" label, and the
+       ✓/✗ that follow stay snug beside it (gap only). Using :first-child after the
+       count span means exactly one element carries the auto-margin in each mode. */
+    .uq-listhead > .pl-confirm, .uq-listhead > .mini:nth-child(2) { margin-left: auto; }
+    .uq-input, .invite-input { flex: 1; min-width: 0; background: #333; border: 1px solid #555; border-radius: 4px; color: #fff; padding: 8px; font-size: 13px; }
+    .uq-add button, .invite-btn { background: #5865F2; color: #fff; border: none; border-radius: 4px; padding: 8px 14px; cursor: pointer; font-size: 13px; }
+    .uq-note { min-height: 16px; }
+    .uq-section { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #777; margin: 10px 0 4px; }
+    .uq-item.declared { border-color: #3a4a6a; }
+    /* Song row (reusable: My Queue, Room Queue, later Playlists/Add-by-link).
+       Thumbnail slot is a fixed box; the stored downscale or the direct ytimg
+       URL fills it (object-fit:cover). Title/duration are text; geo is reserved
+       (blank until a geo provider is wired). Built node-by-node in interface.js
+       — never innerHTML. */
+    .song-row { position: relative; display: flex; align-items: center; gap: 10px; min-height: 44px; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 4px; padding: 6px 8px; font-size: 13px; overflow: hidden; }
+    /* Commit bar — only the top-CAP rows carry one. Colour is a MATCH, not an event:
+       green = the room's declared slot matches this row (confirmed); blue = a local
+       top-CAP song not yet confirmed. Static fill in this phase; the countdown
+       animation lands in a later phase. */
+    .song-row .commit-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,0.07); overflow: hidden; }
+    .song-row .commit-fill { height: 100%; width: 100%; }
+    .song-row .commit-bar.green .commit-fill { background: #43b581; }
+    .song-row .commit-bar.sent  .commit-fill { background: #5865F2; }
+    /* 'pending' = counting down to send: the fill sweeps left→right over the settle
+       window (matches DEBOUNCE_MS). The panel renders once when the edit lands and again
+       only when it settles, so the animation runs uninterrupted; a mid-countdown edit
+       re-renders and restarts it from zero — which is exactly the reset we want. */
+    .song-row .commit-bar.pending .commit-fill { background: #5865F2; width: 0%; animation: commit-countdown 5s linear forwards; }
+    @keyframes commit-countdown { from { width: 0%; } to { width: 100%; } }
+    .song-row .thumb-slot { width: 53px; height: 30px; min-height: 30px; flex: 0 0 auto; align-self: center; border-radius: 3px; background: #26262c; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+    .song-row .thumb-play { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.45); color: #fff; font-size: 13px; opacity: 0; transition: opacity .12s ease; }
+    .song-row .thumb-slot:hover .thumb-play { opacity: 1; }
+    .song-row .thumb-slot:focus-visible { outline: 2px solid #5865F2; outline-offset: 1px; }
+    .song-row .thumb-slot:focus-visible .thumb-play { opacity: 1; }
+    .song-row .thumb-slot::before { content: "\266A"; color: #51515b; font-size: 14px; line-height: 1; }
+    .song-row .thumb { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; border-radius: 3px; background: transparent; object-fit: cover; display: block; opacity: 0; transition: opacity .15s ease; }
+    .song-row .thumb.loaded { opacity: 1; }
+    .song-row .thumb.instant { transition: none; }
+    .song-row .sr-main { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 1px; }
+    .song-row .sr-title { color: #ddd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .song-row .sr-sub { color: #888; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .song-row .sr-dur { color: #9aa; }
+    .song-row .sr-geo { color: #c08; }
+    .song-row .sr-pos { color: #666; flex: 0 0 auto; min-width: 16px; text-align: right; font-variant-numeric: tabular-nums; }
+    .song-row .uq-actions, .song-row .rot-actions { margin-left: auto; }
+    .song-row .sr-when { color: #777; }
+    .song-row .sr-dur:not(:empty) ~ .sr-when::before { content: " · "; }
+    .song-row .sr-who { font-weight: 600; }
+    .song-row .sr-who::after { content: " · "; color: #888; font-weight: 400; }
+    .song-row .rq-who { font-weight: bold; margin-right: 6px; }
+    /* Room-queue grouping: a DJ (head: name + staff actions) and their pending
+       songs rendered as read-only song rows beneath. */
+    .rq-group { display: flex; flex-direction: column; gap: 4px; background: #161616; border: 1px solid #262626; border-radius: 4px; padding: 6px; }
+    .rq-group.playing { border-color: #5865F2; }
+    .rq-head { display: flex; align-items: center; gap: 8px; }
+    .rq-group .song-row { background: #1d1d1d; }
+    .rq-group .song-row.playing { border-color: #5865F2; }
+    .join-btn { background: #2e7d32; color: #fff; border: none; border-radius: 4px; padding: 8px 16px; cursor: pointer; font-size: 13px; }
+    .join-group { display: flex; align-items: stretch; gap: 6px; }
+    /* Leave lock — square, same height as the join/leave button; shown only in
+       Leave mode (toggled in JS). Locked turns it red. */
+    .leave-lock-btn { background: #2e2e35; color: #cdd; border: 1px solid #3a3a44; border-radius: 4px; width: 34px; padding: 0; cursor: pointer; font-size: 13px; line-height: 1; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; }
+    .leave-lock-btn:hover { background: #36363f; }
+    .leave-lock-btn.locked { background: #5a2230; border-color: #7a3145; color: #ffb3c0; }
+    .join-btn.active { background: #5a2230; }
+    .join-btn.dropped { background: #8a5a00; }
+    .join-btn.refilling { background: #2a4d6e; }
+    .join-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .roster-box { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+    .right-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .roster { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .rank-tag { margin-left: auto; color: #888; font-size: 12px; }
+    .rank-select { background: #333; border: 1px solid #555; border-radius: 4px; color: #fff; padding: 4px; font-size: 12px; }
+
+    .chat { flex: 1; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+    .chat-messages { flex: 1; min-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; background: rgba(12,12,16,0.45); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; padding: 10px; }
+    .chat-msg { font-size: 13px; line-height: 1.4; word-break: break-word; }
+    .sender { color: #5865F2; font-weight: bold; margin-right: 6px; }
+    .chat-input-row { display: flex; gap: 8px; }
+    /* Secure-chat offline banner — amber, sits above the message list; the Reconnect
+       button runs the tiered recovery (retry-in-place, then SW-kill + reload). */
+    .chat-crypto-banner { display: none; align-items: center; gap: 10px; margin-bottom: 6px;
+      padding: 8px 10px; border-radius: 6px; border: 1px solid #4a3f1a; background: #2a2412;
+      color: #e8c14a; font-size: 12px; }
+    .chat-crypto-banner .ccb-text { flex: 1; min-width: 0; }
+    .chat-crypto-banner .ccb-btn { flex: none; background: #e8c14a; color: #1a1508; border: none;
+      border-radius: 4px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .chat-crypto-banner .ccb-btn:disabled { opacity: 0.6; cursor: default; }
+    .chat-input { flex: 1; min-width: 0; background: #333; border: 1px solid #555; border-radius: 4px; color: #fff; padding: 8px; font-size: 13px; }
+    .chat-input-row button { background: #5865F2; color: #fff; border: none; border-radius: 4px; padding: 8px 14px; cursor: pointer; }
+
+    /* Room settings tab */
+    .settings { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+    .settings-box { display: flex; flex-direction: column; gap: 6px; }
+    .set-row { display: flex; flex-direction: column; gap: 6px; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px; padding: 10px; }
+    .set-label { font-size: 13px; color: #ccc; }
+    .set-opts { display: flex; gap: 6px; flex-wrap: wrap; }
+    .set-opt { background: #222; color: #aaa; border: 1px solid #333; border-radius: 4px; padding: 6px 12px; cursor: pointer; font-size: 12px; }
+    .set-opt.active { background: #5865F2; color: #fff; border-color: #5865F2; }
+    .set-opt:disabled { cursor: default; }
+    .set-opt.active:disabled { opacity: 1; }
+    .set-opt:disabled:not(.active) { opacity: 0.4; }
+    .set-hint { font-size: 11px; color: #888; font-style: italic; }
+    /* Room-settings master lock (owner-only). Prominent at the top of the panel; amber/locked
+       vs green/unlocked so the owner can see at a glance whether settings are editable. */
+    .settings-lock { display: block; width: 100%; text-align: left; margin: 2px 0 8px; padding: 8px 12px;
+      border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid #4a3f1a;
+      background: #2a2412; color: #e8c14a; }
+    .settings-lock:not(.locked) { border-color: #1f4a2f; background: #12261a; color: #6ee7a0; }
+    .settings-lock:hover { filter: brightness(1.15); }
+
+    /* Logs tab (relocated debug log): this session green, older sessions grey */
+    .logs { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .logs-box { flex: 1; min-height: 120px; overflow-y: auto; background: #000; border: 1px solid #2a2a2a; border-radius: 6px; padding: 8px; font-size: 11px; display: flex; flex-direction: column; gap: 1px; }
+    .log-line { white-space: pre-wrap; word-break: break-word; font-family: monospace; }
+    .log-line.fresh { color: #6c7; }
+    .log-line.old { color: #666; }
+
+    /* Gear tab (renamed from "Logs") + its Logs/Settings sub-tabs */
+    .tab-gear { font-size: 15px; line-height: 1; padding: 5px 12px; }
+    .gear-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+    .subtabs { display: flex; gap: 4px; margin-bottom: 6px; }
+    .subtab { background: #1b1b1b; color: #999; border: 1px solid #2a2a2a; border-radius: 4px; padding: 4px 12px; cursor: pointer; font-size: 12px; }
+    .subtab.active { background: #2a2d4a; color: #fff; border-color: #5865F2; }
+
+    /* Playlists panel (14 §5 / P3) */
+    .pl-row { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 4px; padding: 8px 10px; font-size: 13px; }
+    .pl-name { flex: 1; min-width: 0; text-align: left; background: none; border: none; color: #ddd; cursor: pointer; font-size: 13px; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pl-name:hover { color: #fff; }
+    .pl-count { color: #777; font-size: 11px; flex: 0 0 auto; }
+    .pl-rename { flex: 1; min-width: 0; }
+    .pl-confirm { color: #e06c6c; font-size: 12px; }
+    .mini.danger { background: #5a2323; color: #ffd9d9; }
+    .pl-detail-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .pl-back { flex: 0 0 auto; }
+    .pl-detail-title { flex: 1; min-width: 0; color: #fff; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pl-detail-body { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+    /* Library: pinned create head + independently scrolling list */
+    .pl-lib-head { flex: 0 0 auto; }
+    .pl-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+
+    /* Add-to-playlist picker overlay (body-mounted, the Preview precedent) */
+    .pl-pick-overlay { position: fixed; inset: 0; z-index: 210; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; }
+    .pl-pick-card { width: min(360px, 92vw); max-height: 80vh; overflow: hidden; background: #1c1c1f; border: 1px solid #333; border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+    .pl-pick-head { flex: 0 0 auto; display: flex; align-items: center; }
+    .pl-pick-title { flex: 1; color: #fff; font-weight: 600; font-size: 14px; }
+    .pl-pick-new { flex: 0 0 auto; margin-top: 2px; }
+    .pl-pick-note { flex: 0 0 auto; min-height: 16px; }
+    .pl-pick-list { max-height: 55vh; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+    .pl-pick-item { flex: 0 0 auto; text-align: left; background: #242428; color: #ddd; border: 1px solid #33333a; border-radius: 4px; padding: 9px 10px; cursor: pointer; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pl-pick-item:hover { background: #2d2d34; color: #fff; }
+
+    /* Settings sub-tab: chat image/link display prefs */
+    .chat-settings { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+    .chat-settings-box { display: flex; flex-direction: column; gap: 14px; }
+    .pref-section { border: 1px solid #2a2a2a; border-radius: 6px; padding: 10px 12px; background: #161616; }
+    .pref-master-row { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+    .pref-master { width: 15px; height: 15px; accent-color: #5865F2; cursor: pointer; }
+    .pref-title { font-size: 13px; font-weight: 600; color: #ddd; }
+    .pref-note { font-size: 11px; color: #888; margin: 5px 0 8px 23px; line-height: 1.4; }
+    .pref-hosts { display: flex; flex-direction: column; gap: 6px; margin-left: 23px; }
+    .pref-hosts.pref-disabled { opacity: 0.45; }
+    .dim-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+    .dim-label { display: flex; justify-content: space-between; min-width: 130px; font-size: 12px; color: #bbb; }
+    .dim-val { color: #888; }
+    .dim-slider { flex: 1; accent-color: #5865F2; cursor: pointer; }
+    .pref-host { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #bbb; cursor: pointer; }
+    .pref-host input { accent-color: #5865F2; cursor: pointer; }
+    .pref-chip { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; background: #222; border: 1px solid #333; border-radius: 12px; padding: 2px 6px 2px 10px; font-size: 12px; color: #cdd; }
+    .pref-chip-x { background: none; border: none; color: #999; cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }
+    .pref-chip-x:hover { color: #f66; }
+    .pref-add-row { display: flex; gap: 6px; margin-top: 4px; }
+    .pref-add-input { flex: 1; min-width: 0; background: #0d0d0d; color: #ddd; border: 1px solid #333; border-radius: 4px; padding: 4px 8px; font-size: 12px; }
+    .pref-add-btn { background: #2a2d4a; color: #fff; border: 1px solid #5865F2; border-radius: 4px; padding: 4px 12px; cursor: pointer; font-size: 12px; }
+    .pref-add-btn:disabled, .pref-add-input:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Clickable chat links (opt-in, allowlisted https only) */
+    .chat-link { color: #8ab4ff; text-decoration: underline; word-break: break-all; }
+    .chat-link:hover { color: #aac6ff; }
+  </style>
+</head>
+<body>
+
+<script src="https://www.youtube.com/iframe_api"></script>
+
+<!-- LOGIN -->
+<div id="screen-login" class="screen">
+  <div class="login-box">
+    <h2>DDJP</h2>
+    <p>Decentralized DJ Protocol</p>
+    <input id="input-homeserver" type="text" value="https://matrix.org" />
+    <input id="input-username" type="text" placeholder="@username:matrix.org" />
+    <input id="input-password" type="password" placeholder="Password" />
+    <p id="login-error">Login failed. Check your credentials.</p>
+    <button id="btn-login">Log in with Matrix</button>
+    <div class="login-or">or</div>
+    <button id="btn-sso">Sign in with SSO</button>
+  </div>
+</div>
+
+<!-- ENCRYPTION / RECOVERY KEY (built by ui/interface.js) -->
+<div id="screen-encryption" class="screen"></div>
+
+<!-- ROOM SELECTOR -->
+<div id="screen-rooms" class="screen">
+  <div style="display:flex; justify-content:space-between; align-items:center;">
+    <h2>DDJP Rooms</h2>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <!-- viewer's own Matrix ID + copy button, filled by interface.js -->
+      <span id="rooms-identity" style="display:flex; align-items:center; gap:8px;"></span>
+      <button id="btn-manage-accounts" class="btn-secondary">Accounts</button>
+      <button id="btn-logout" class="btn-secondary">Log out</button>
+    </div>
+  </div>
+  <div id="create-room-section" style="display:flex; flex-direction:column; gap:8px;">
+    <div class="room-actions">
+      <input id="input-room-name" placeholder="Room name..." />
+      <button class="btn-primary" id="btn-create-room">Create Room</button>
+    </div>
+    <div id="create-progress">
+      <div class="muted">Creating room channels...</div>
+      <div id="create-progress-bar-track"><div id="create-progress-bar-fill"></div></div>
+      <div id="create-progress-step"></div>
+      <div id="create-error" style="display:none; color:#e06c6c; font-size:12px;"></div>
+      <button class="btn-secondary" id="btn-create-retry" style="display:none;">Resume creating</button>
+    </div>
+  </div>
+  <div class="room-actions">
+    <input id="input-join-code" placeholder="Paste Space ID to join..." />
+    <button class="btn-secondary" id="btn-join-room">Join Room</button>
+  </div>
+  <h3 style="margin-top:8px">Recent Rooms</h3>
+  <div id="room-list"></div>
+</div>
+
+<!-- MANAGE ACCOUNTS (contents built by ui/interface.js) -->
+<div id="screen-accounts" class="screen"></div>
+
+<!-- MAIN (contents built by ui/interface.js) -->
+<div id="screen-main" class="screen"></div>
+
+
+<!-- Load order matters: no dependencies first, then dependents. -->
+<!-- Logger first: it installs console redaction before the SDK can log anything. -->
+<script src="core/logger.js?v=94"></script>
+
+<!-- Vendored matrix-js-sdk 41.8.0 + Rust crypto WASM (see tools/VENDOR_PROVENANCE.md). -->
+<!-- Exposes the global `matrixcs`; the crypto WASM loads on demand via matrixcs.loadCrypto(). -->
+<script src="lib/matrix-sdk.bundle.js"></script>
+
+<!-- Core — no dependencies between these -->
+<script src="core/storageio.js?v=94"></script>
+<script src="core/idb.js?v=94"></script>
+<script src="core/playlistdoc.js?v=94"></script>
+<script src="core/store.js?v=94"></script>
+<script src="core/chatprefs.js?v=94"></script>
+<script src="core/eventcache.js?v=94"></script>
+<script src="core/statederiver.js?v=94"></script>
+<script src="core/streammanager.js?v=94"></script>
+<script src="core/blockmanager.js?v=94"></script>
+<script src="core/windowedlist.js?v=94"></script>
+
+<!-- Transport — depends on core -->
+<script src="transport/matrixbridge.js?v=94"></script>
+
+<!-- Features — depend on transport + core. roomupgrade + userqueue load before room.js, which inits them. -->
+<script src="features/queue.js?v=94"></script>
+<script src="features/skip.js?v=94"></script>
+<script src="features/reactions.js?v=94"></script>
+<script src="features/playback.js?v=94"></script>
+<script src="features/chat.js?v=94"></script>
+<script src="features/media.js?v=94"></script>
+<script src="features/roomupgrade.js?v=94"></script>
+<script src="features/userqueue.js?v=94"></script>
+<script src="features/playlists.js?v=94"></script>
+<script src="features/metadata.js?v=94"></script>
+<script src="features/room.js?v=94"></script>
+
+<!-- UI — depends on everything above -->
+<script src="ui/chatbuffer.js?v=94"></script>
+<script src="ui/interface.js?v=94"></script>
+
+<script src="app.js?v=94"></script>
+
+<!-- Service worker: forces fresh index.html on every load so deploys are picked up
+     on a normal refresh (external file — page CSP forbids inline scripts). -->
+<script src="sw-register.js?v=94"></script>
+
+</body>
+</html>
