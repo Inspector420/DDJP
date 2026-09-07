@@ -1,0 +1,18 @@
+{
+  "name": "ddjp",
+  "private": true,
+  "description": "Decentralized DJ Protocol \u2014 static client-side Matrix app. This manifest is BUILD/AUDIT ONLY: the app ships the vendored bundle in lib/ and needs no npm install to run. These devDependencies pin what the vendored SDK is built from, so Dependabot / npm audit can flag CVEs. eslint is pinned the same way: the LINT GUARD requires it (npm install), and a missing install FAILS the suite rather than skipping \u2014 see tests/check-lint.js.",
+  "scripts": {
+    "test": "node tests/run-all.js",
+    "build:vendor": "bash tools/build-vendor.sh",
+    "audit": "npm audit --audit-level=high",
+    "bump": "node tools/bump-version.js",
+    "lint": "node tests/check-lint.js"
+  },
+  "devDependencies": {
+    "@matrix-org/matrix-sdk-crypto-wasm": "18.3.1",
+    "esbuild": "0.28.1",
+    "matrix-js-sdk": "41.8.0",
+    "eslint": "8.57.1"
+  }
+}
