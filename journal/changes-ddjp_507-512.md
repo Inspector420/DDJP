@@ -1,0 +1,95 @@
+# Change list, ddjp_507 – ddjp_512 (dated record)
+
+*(The running change list kept during the J72 / J67 sessions, one line per change, as the session protocol's third tier asks. Dated by construction: never corrected. Brought into the tree at ddjp_512 after an audit found it lived only in a container.)*
+
+# Phase 1 change list (live, one line per change)
+- tests/check-bot-relay.js (new): J64 guard, parts A–I, driven against the real modules
+- backends/backend2/authority.js: stamp() drops the author's `l` (lost-songs fix); flush() sends at most 10 acts per message; bot.request row `relay: false` + `relays()`
+- backends/backend2/runner.js: LIVE hook armed once and drains held intents on every return to live; bot.here carries no `at`; `at` passed as null by ruling (relay time); accepted-not-relayed path; seals StateDeriver.buildSeed, checked by derive([], seed) before posting
+- backends/backend1/statederiver.js: `isSeed(obj)` (one definition of a resumable starting state); ledger comment corrected (off-air totals do not survive a forget)
+- backends/backend1/streammanager.js: `normaliseAll(raw)` (a list of one)
+- backends/backend2/streammanager.js: `normaliseAll` returns every group member; `normalise` = its first; heldCheckpoints/exportCheckpoint return the shapes the saves list and Save button read (bot-mode file)
+- backends/backend2/checkpoint.js: held() entries carry floorL and thin
+- backends/backend2/transport.js: onRawEvent/offRawEvent re-rank intents-channel raws by power level (delegated settings fix)
+- backends/backend1/matrixbridge.js: `_normaliseAll` helper; clock seed, history rebuild, pageRange, _oldestL and _localPager route through it; history rebuild anchors only on StateDeriver.isSeed seeds
+- tests/check-backends.js: PART H and PART T fixtures take the real wire shapes (intents carry `l`; raws carry `ts`)
+- tests/check-backends.js PART K: named deliberate overrides (onRawEvent/offRawEvent, J64), driven to still reach backend1
+- tests/check-backends.js PART L: real fan-out raw shape; asserts at === null by ruling and no author l
+- tests/check-backends.js PART M: real raw shape; asserts relay time by ruling, reasoning corrected (relay time cannot age anyone)
+- runner seal check compares derive([], seed) with derive(log) (PILLARS §3), not a second source; check-backends PART U loads the real reducer
+- docs main/09-roadmap.md: J64 (DONE) + J65–J68 (open, the approved phases 2–5)
+- docs consensus/bot-backend.md: ddjp_503 status, §3 at ruling, §7 ten-per-message + no member position, new §13 approved plan
+- backends/backend2/README.md: rewritten header (engine is live; file table)
+- matrixbridge.js: the history-anchor rule is a named helper `_isHistoryAnchor` (extracted and run by check-bot-relay E); check-bot-relay F drives the seal check with a broken builder
+- docs: HANDOFF re-headed (?v=471, ddjp_503, J64 live-unseen, what changed); INVENTORY §1b J65–J68 rows; INVENTORY §6's dated record moved whole to ARCHIVE (budget trade); MODULES.md two stale sentences corrected
+- index.html: every ?v= tag 470 -> 471 (tagged backend files changed); package directories renamed ddjp_503 / docs_503
+- tests/check-doc-budget.js: CEILING lowered to the new total (309099) — the ratchet only goes down
+- tests/check-history-durable.js PART G: accepts the named anchor helper (49th signature: the refactor changed the grammar it reads); check-bot-relay E: a non-checkpoint or unplaced one is never an anchor
+- backends/backend2/authority.js (J65): POLICY send table + validatePolicy; submit/tick/_flushNow schedule (instant takes the group, deadlines, ten, budget, merges with `also`, per-person cap); refusal() builds ddjp.bot.refused; JUDGE row for it
+- backends/backend2/runner.js (J65): validates the send table on start; schedule ticks every 250 ms and on every arriving message; drops acts older than the answer window; answers refusals (and too-fast) with ddjp.bot.refused; outcome counters in stats() and the status line
+- backends/backend1/matrixbridge.js (J65): awaitAnswer(eventId) / answerDeadlineMs(); pure _answersIn(ev, refusalOf); _settleAnswers after every spine ingest; exported
+- backends/backend2/transport.js (J65): answerDeadlineMs = POLICY.answerWindowMs + appMarginMs
+- features/queue.js (J65): every act returns the transport's send result, so callers can await its answer
+- features/userqueue.js (J65): every join/undeclare/leave follows its answer: none -> retry once; no or none twice -> release (Join comes back); a send refused before going out is released; lastFailure()
+- features/reactions.js (J65): votes/saves follow their answer; retry once while the song plays; un-press on refusal or no answer
+- features/skip.js (J65): the room's answer decides (refusal reason; one retry while the same song plays); the 4 s watch stays only for transports with no awaitAnswer
+- features/room.js (J65): FEED_KINDS name media.len and bot.here (off by default); foldFeed narrates ddjp.bot.refused as a refused act with its reason; inert types are not counted as refused (judgedOf from both readers)
+- tests/check-event-feed.js PART G: inert kinds may be named only from a frozen declared list, each driven through foldFeed to prove it is narrated (J65)
+- authority.js: per-person cap is a RATE (POLICY.perActor) — a per-group count could never fire; userqueue.js: give-up clears the settle timer as Leave does (found driving: a failing join went round twice)
+- docs bot-backend.md §4a marked superseded (J65); MODULES.md authority/runner sentences corrected
+- docs 09-roadmap.md: J65 DONE (built, measured, found); J69 opened (answers on screen for staff acts and settings requests); bot-backend §13 J65 starting values
+- backend2/README.md link made version-free; doc-budget CEILING lowered to 309037; index.html ?v=472; directories renamed ddjp_504 / docs_504
+- J70 backends/backend1/streammanager.js: door head per room when the engine asks (setDoorScope); reset returns to global; backends/backend2/streammanager.js turns it on in setFoldScope
+- J70 features/playback.js: one advance in flight per song until its answer; ADVANCE_RESEND_MS after a no/none (bot-501: 17 sends in 34 s)
+- J70 features/botruntime.js: a join/declare seen in the last 30 s holds the idle sweep for that person (bot-501 09:50: removed 4 s before the rejoin folded)
+- docs 09-roadmap: J70 DONE (the owner's v472 run: door per room in bot rooms, one advance in flight, arriving join holds the sweep) + J71 open decision (shared-room door order)
+- ceiling lowered to 309034; index.html ?v=473; directories renamed ddjp_505 / docs_505
+- J66 backends/backend2/runner.js: the runner ends songs (full agreed length / first song / maxLen ceiling) on server time, one in flight; one length per song (first + higher-rank disagreement); own acts via submitOwn/_intake
+- J66: playback adds advanceBackupMs to its send delay; B2 transport advanceBackupMs=10000 and own-send routing; B1 advanceBackupMs=0; authority media.len relay:false
+- J66: mediablocked report re-sent once on no answer (same song, still blocked, not recorded); playback length re-sent once on no answer if the room still agrees nothing
+- tests: check-wiring row for the _followReport send site; check-backends/check-bot-relay runner fixtures use dj.skip as the instant relayed act (media.len is absorbed since J66)
+- docs: J66 DONE (built, measured, not built), J71 marked UNCHECKED, HANDOFF re-headed for ddjp_506, INVENTORY J66 row removed, bot-backend §13 note
+- ceiling 308970; ?v=474; renamed ddjp_506 / docs_506
+- J72 authority.js: POLICY.instantMinGapMs (0 = off) with an ordered instant queue drained by tick/flush; instant submit returns its delivery promise
+- J72 runner.js: clock offset from own round trips (tightest, <=3.5 s), age and timing on it; no end margin; advance retried only after its echo returned without moving the room (5 s) or after the answer window
+- docs: J72 DONE entry; HANDOFF re-headed for ddjp_507
+- milestone docs-for audit: main/03-modules.md Skip, Playback, Reactions entries corrected where they live
+- milestone docs-for audit: paths.md §1 notes the bot-room first link (runner) and the app backup
+- bot-backend.md §13: the owner's rulings ddjp_505–507 recorded (delays only for reliability; votes 5 s; instant floor 0; 1/s clock declined; no replay of missed requests; hidden-tab pause separate)
+- HANDOFF re-headed for ddjp_508 (milestone: tree, live-verified, owed, changed); its dated unseen-UI list moved whole to ARCHIVE
+- ceiling 308757; package renamed ddjp_508 / docs_508 (docs-only: ?v=475 unchanged)
+- J71 roadmap: CONFIRMED with honest clients (probe-j71), replacing UNCHECKED
+- J67 roadmap: design recorded from the boundaries read (floor source, window, seed licence, History); open boundary _deriveBest
+- J67 roadmap: boundaries read (_deriveBest, genesis-only validation, SettingsProof, runner seal base) recorded
+- J67 redesigned and ruled by the owner (queue from newest save point; activity read separately, 24 h cap) — roadmap + bot-backend §13
+- J71/J67 roadmap: replays run in parallel per channel (load order is network timing) — evidence for J71, design constraint for J67
+- J67 roadmap: equal-position edge case (single-id covers skips the id tie-break) recorded with its fix
+- J67 roadmap: settings-position edge case analysed (owner's clock bypasses the bot's order); two options proposed
+- J67: owner ruling — settings read back to seed.settingsFrom, later changes applied on top; residual accepted
+- J67 step 1: B1 streammanager adoptFloor/floorSeed (+settings judged by seed.settingsFrom, arrival rule); B2 adoptFloor (newest usable save point, window-aware); guard check-bot-open (A-E, mutations S1-S5 red)
+- J67 step 1: adoption drops raise _derivedLogTrimmed (false divergence warnings otherwise); _bankedArrival takes judgedBySettings so its call keeps the shape check-divergence-signal reads
+- J67 step 2: runner _buildSealSeed(log) builds on StreamManager.floorSeed() with its reproduce-check; check-bot-open part F; mutations T1/T2 red
+- J67 step 3: History.attach seed asks StreamManager.floorSeed() first (Floor.seed() fallback, same in shared rooms); check-bot-open part G
+- J67 step 4: B2 openFromSavePoint (renamed); Room opens from it after every channel's replay settles, keeping openWindowMs (AFK/idle + warning); check-bot-open part H; mutations U1-U3 red
+- J67 step 4 fix: the activity window lives in the bot engine (B2 activityWindowMs) — Room reads no bot settings (check-settings-rows PART I)
+- J67 roadmap progress updated: steps 1-4 built; remaining download stop, background read, 24 h cap
+- J67: owner's rules for the background reads recorded (roadmap + bot-backend §13)
+- J67: BotRuntime decides a repeat skip at the song's start only (REPEAT_DECIDE_MS 10 s, history able to answer); check-repeat-cooldown PART H2; mutations V1/V2 red
+- J67: songs accepted while history could not answer are honoured once at their start (BotRuntime _acceptedUnknown); check-repeat-cooldown PART H3; mutations W1-W3 red
+- J67: owner's rule replaces the memory marks — at a song's start the bot skips only a repeat inside its held log (_playedInHeld); check-repeat-cooldown H3 rewritten; harness getLog models the held log; mutations X1/X2 red
+- J67 stage 1: download stops at the newest usable save point (B2 replayHasEnough; matrixbridge replayRoom asks before each page, stopped != reached start); openFromSavePoint defaults to newest; check-bot-open part I; mutations Y1-Y4 red
+- J67 safety: presence warns/removes nobody while the held log is shorter than its window (fold.bounded hold in reconcilePresence); three fixtures in check-idle-sweep/check-presence-chat given reach anchors (two had acts at NEGATIVE times the fold ignored); hold row added; mutation Z1 red
+- J67 stage 2: B2 background activity list (noteActivity/olderActivity/activityCovered, actor-credited, auto re-join not counted); matrixbridge _readActivityBack after a stopped download; Room.idleFor + foldActivity/recentlyActive merge it (groups + reach); check-bot-open J, check-idle-sweep PART J67; mutations AA1-AA4 red
+- J67 stage 2 fix: transport uses no app clock (check-boundaries) — activityCovered() defaults to the held log's newest server stamp; check-bot-open J row
+- J67: the 24 h cap was already in SETTING_RANGES (queueIdleMs, botAfkMs; pings 1 h) — pinned by check-bot-open part K; mutation AB1 red; no settings change, no room breaks
+- docs: J67 DONE (roadmap, census), INVENTORY row removed, J71 row updated; bot-backend §13 opening + ruling passages corrected to what was built and finally ruled
+- docs: roles.md replay-cooldown row notes the J67 narrowing (short, on the reading path)
+- ceiling 308562; ?v=476; package ddjp_509 / docs_509
+- J67 chat: BotRuntime _readChatBack (at start, every chat tier, merges newest per person, covered only if every chat is) + MatrixBridge.readBackActivity (pageRange's scrolling; who and when, no decryption; own messages excluded; start reached = covered, owner); check-idle-sweep PART Q2; mutations AC1-AC4 red
+- docs: J67 chat read-back recorded; HANDOFF ddjp_510; ceiling 308541; ?v=477; package ddjp_510
+- milestone docs audit: AFK-DESIGN Layer 1, MODULES.md bot door, main/03-modules Room entry corrected for J67; HANDOFF re-headed ddjp_511; bot-501 caution moved to ARCHIVE (no longer live)
+- ceiling 308512; package ddjp_511 / docs_511 (docs-only: ?v=477 unchanged)
+- ddjp_512 (the ddjp_511 audit): one usable-save-point rule for the download stop and the opening (B2 _usableSavePoint; `stopped` reported; Room's messages made true); a shrunk timeline stops the activity read short (matrixbridge); _trustedSeed answers from the adopted save point first; noteActivity credits `at` like _shape; Capabilities.activityWindowMs is the formula's one home; the dead now gate and unused window path removed; stale J70 pointer → J71
+- ddjp_512 guards: check-bot-open M (usable rule, tie measured unreachable), N (both background reads RUN against a fake client), O (the seed/floor pair), J at-row; check-bot-songs K2 (the 3.5 s cap)
+- ddjp_512 probes: tools/probes/mutate-j67-j72.js (27 named breaks, restores on exit); tools/probes/probe-j71-door-order.js (relative paths)
+- ddjp_512 docs: J67 audit note, superseded/overtaken marks, Touches; J72 claim corrected; J71 probe pointer; J73 added (owner: shared rooms get the same rules; interim effect stated); §13 range and chat wording; INVENTORY J73; HANDOFF ddjp_512 (dated room-creation line → ARCHIVE)
